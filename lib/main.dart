@@ -1,4 +1,3 @@
-
 import 'dart:async';
 import 'dart:convert';
 
@@ -11,6 +10,9 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const PayamApp());
 }
+
+const String defaultServerFeedUrl =
+    'https://raw.githubusercontent.com/ghazalsharifi1373-a11y/payam-vpn/main/servers.json';
 
 class ServerEntry {
   String name;
@@ -37,11 +39,11 @@ class ServerEntry {
 
   factory ServerEntry.fromJson(Map<String, dynamic> json) {
     return ServerEntry(
-      name: json['name'] ?? 'Server',
-      country: json['country'] ?? 'Unknown',
-      link: json['link'] ?? '',
-      favorite: json['favorite'] ?? false,
-      delay: json['delay'] ?? -1,
+      name: (json['name'] ?? 'Server').toString(),
+      country: (json['country'] ?? 'Unknown').toString(),
+      link: (json['link'] ?? '').toString(),
+      favorite: json['favorite'] == true,
+      delay: (json['delay'] as num?)?.toInt() ?? -1,
     );
   }
 }
@@ -59,6 +61,11 @@ class PayamApp extends StatelessWidget {
         colorScheme: const ColorScheme.dark(
           primary: Color(0xFF00B8FF),
           secondary: Color(0xFF00D5FF),
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF07111F),
+          foregroundColor: Colors.white,
+          elevation: 0,
         ),
       ),
       home: const HomePage(),
@@ -85,14 +92,13 @@ class _HomePageState extends State<HomePage> {
   bool initialized = false;
   bool busy = false;
   bool connected = false;
-
-  // Automatic speed sorting
   bool speedSortEnabled = false;
   bool speedSortRunning = false;
+
   Timer? speedSortTimer;
 
   String statusText = 'Disconnected';
-  String feedUrl = '';
+  String feedUrl = defaultServerFeedUrl;
 
   int downloadSpeed = 0;
   int uploadSpeed = 0;
@@ -148,10 +154,11 @@ class _HomePageState extends State<HomePage> {
           .map((item) => ServerEntry.fromJson(
                 Map<String, dynamic>.from(item),
               ))
+          .where((server) => server.link.isNotEmpty)
           .toList();
 
       history = savedHistory;
-      feedUrl = prefs.getString('feedUrl') ?? '';
+      feedUrl = prefs.getString('feedUrl') ?? defaultServerFeedUrl;
 
       await v2ray.initialize(
         notificationIconResourceType: 'mipmap',
@@ -163,8 +170,14 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         initialized = true;
       });
+
+      // Fetch the latest public server list automatically on app startup.
+      unawaited(updateServers());
     } catch (e) {
       if (!mounted) return;
+      setState(() {
+        initialized = true;
+      });
       showMessage('Initialization error: $e');
     }
   }
@@ -174,9 +187,8 @@ class _HomePageState extends State<HomePage> {
 
     await prefs.setString(
       'servers',
-      jsonEncode(servers.map((s) => s.toJson()).toList()),
+      jsonEncode(servers.map((server) => server.toJson()).toList()),
     );
-
     await prefs.setStringList('history', history);
     await prefs.setString('feedUrl', feedUrl);
   }
@@ -192,30 +204,23 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  String formatRate(int bytesPerSecond) {
-    if (bytesPerSecond < 1024) {
-      return '$bytesPerSecond B/s';
+  String formatRate(int value) {
+    if (value < 1024) return '$value B/s';
+    if (value < 1024 * 1024) {
+      return '${(value / 1024).toStringAsFixed(1)} KB/s';
     }
-
-    if (bytesPerSecond < 1024 * 1024) {
-      return '${(bytesPerSecond / 1024).toStringAsFixed(1)} KB/s';
-    }
-
-    return '${(bytesPerSecond / (1024 * 1024)).toStringAsFixed(2)} MB/s';
+    return '${(value / (1024 * 1024)).toStringAsFixed(2)} MB/s';
   }
 
-  String formatData(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-
-    if (bytes < 1024 * 1024) {
-      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  String formatData(int value) {
+    if (value < 1024) return '$value B';
+    if (value < 1024 * 1024) {
+      return '${(value / 1024).toStringAsFixed(1)} KB';
     }
-
-    if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    if (value < 1024 * 1024 * 1024) {
+      return '${(value / (1024 * 1024)).toStringAsFixed(1)} MB';
     }
-
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+    return '${(value / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 
   Widget trafficPanel() {
@@ -239,18 +244,12 @@ class _HomePageState extends State<HomePage> {
                 Expanded(
                   child: Column(
                     children: [
-                      const Icon(
-                        Icons.arrow_downward,
-                        color: Color(0xFF00D5FF),
-                      ),
+                      const Icon(Icons.arrow_downward,
+                          color: Color(0xFF00D5FF)),
                       const SizedBox(height: 5),
-                      const Text(
-                        'DOWNLOAD',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11,
-                        ),
-                      ),
+                      const Text('DOWNLOAD',
+                          style:
+                              TextStyle(color: Colors.white70, fontSize: 11)),
                       const SizedBox(height: 4),
                       Text(
                         connected ? formatRate(downloadSpeed) : '--',
@@ -263,33 +262,21 @@ class _HomePageState extends State<HomePage> {
                       Text(
                         'Total: ${formatData(totalDownloaded)}',
                         style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 11,
-                        ),
+                            color: Colors.white54, fontSize: 11),
                       ),
                     ],
                   ),
                 ),
-                Container(
-                  width: 1,
-                  height: 75,
-                  color: Colors.white24,
-                ),
+                Container(width: 1, height: 75, color: Colors.white24),
                 Expanded(
                   child: Column(
                     children: [
-                      const Icon(
-                        Icons.arrow_upward,
-                        color: Color(0xFF48D6A5),
-                      ),
+                      const Icon(Icons.arrow_upward,
+                          color: Color(0xFF48D6A5)),
                       const SizedBox(height: 5),
-                      const Text(
-                        'UPLOAD',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11,
-                        ),
-                      ),
+                      const Text('UPLOAD',
+                          style:
+                              TextStyle(color: Colors.white70, fontSize: 11)),
                       const SizedBox(height: 4),
                       Text(
                         connected ? formatRate(uploadSpeed) : '--',
@@ -302,9 +289,7 @@ class _HomePageState extends State<HomePage> {
                       Text(
                         'Total: ${formatData(totalUploaded)}',
                         style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 11,
-                        ),
+                            color: Colors.white54, fontSize: 11),
                       ),
                     ],
                   ),
@@ -316,10 +301,7 @@ class _HomePageState extends State<HomePage> {
                 padding: EdgeInsets.only(top: 10),
                 child: Text(
                   'Connect to see live speed',
-                  style: TextStyle(
-                    color: Colors.white54,
-                    fontSize: 11,
-                  ),
+                  style: TextStyle(color: Colors.white54, fontSize: 11),
                 ),
               ),
           ],
@@ -328,337 +310,11 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Future<void> addServer() async {
-    final nameController = TextEditingController();
-    final countryController = TextEditingController();
-    final linkController = TextEditingController();
-
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF102238),
-        title: const Text('Add server'),
-        content: SingleChildScrollView(
-          child: Column(
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Server name',
-                ),
-              ),
-              TextField(
-                controller: countryController,
-                decoration: const InputDecoration(
-                  labelText: 'Country',
-                ),
-              ),
-              TextField(
-                controller: linkController,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'V2Ray link',
-                  hintText: 'vless:// or vmess:// or trojan://',
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-
-    if (result == true) {
-      final link = linkController.text.trim();
-
-      if (link.startsWith('vless://') ||
-          link.startsWith('vmess://') ||
-          link.startsWith('trojan://') ||
-          link.startsWith('ss://')) {
-        servers.add(
-          ServerEntry(
-            name: nameController.text.trim().isEmpty
-                ? 'New server'
-                : nameController.text.trim(),
-            country: countryController.text.trim().isEmpty
-                ? 'Unknown'
-                : countryController.text.trim(),
-            link: link,
-          ),
-        );
-
-        await saveData();
-
-        if (mounted) setState(() {});
-        showMessage('Server saved');
-      } else {
-        showMessage('Invalid server link');
-      }
-    }
-
-    nameController.dispose();
-    countryController.dispose();
-    linkController.dispose();
-  }
-
-  Future<int> testServer(ServerEntry server) async {
-    try {
-      final parsed = V2ray.parseFromURL(server.link);
-
-      return await v2ray
-          .getServerDelay(
-            config: parsed.getFullConfiguration(),
-          )
-          .timeout(const Duration(seconds: 15));
-    } catch (_) {
-      return -1;
-    }
-  }
-
-  // Tests all servers and sorts them from lowest ping to highest ping.
-  Future<void> refreshSpeedOrder() async {
-    if (!mounted ||
-        !speedSortEnabled ||
-        speedSortRunning ||
-        busy ||
-        servers.isEmpty) {
-      return;
-    }
-
-    speedSortRunning = true;
-
-    final selectedLink =
-        selectedServer >= 0 && selectedServer < servers.length
-            ? servers[selectedServer].link
-            : null;
-
-    setState(() {
-      busy = true;
-    });
-
-    try {
-      final currentServers = List<ServerEntry>.from(servers);
-
-      for (final server in currentServers) {
-        if (!mounted || !speedSortEnabled) break;
-
-        final delay = await testServer(server);
-        server.delay = delay;
-
-        if (mounted) {
-          setState(() {});
-        }
-      }
-
-      if (!mounted || !speedSortEnabled) return;
-
-      servers.sort((a, b) {
-        final aDelay = a.delay > 0 ? a.delay : 999999999;
-        final bDelay = b.delay > 0 ? b.delay : 999999999;
-
-        return aDelay.compareTo(bDelay);
-      });
-
-      if (selectedLink != null) {
-        selectedServer =
-            servers.indexWhere((s) => s.link == selectedLink);
-      }
-
-      await saveData();
-
-      if (mounted) {
-        setState(() {});
-        showMessage('Server speed order updated');
-      }
-    } catch (e) {
-      if (mounted) {
-        showMessage('Speed test error: $e');
-      }
-    } finally {
-      speedSortRunning = false;
-
-      if (mounted) {
-        setState(() {
-          busy = false;
-        });
-      }
-    }
-  }
-
-  void toggleSpeedSort(bool enabled) {
-    setState(() {
-      speedSortEnabled = enabled;
-    });
-
-    speedSortTimer?.cancel();
-    speedSortTimer = null;
-
-    if (enabled) {
-      refreshSpeedOrder();
-
-      speedSortTimer = Timer.periodic(
-        const Duration(seconds: 30),
-        (_) {
-          if (speedSortEnabled && mounted) {
-            refreshSpeedOrder();
-          }
-        },
-      );
-    } else {
-      showMessage('Automatic speed sorting disabled');
-    }
-  }
-
-  Future<void> connectToServer(int index) async {
-    if (!initialized ||
-        busy ||
-        index < 0 ||
-        index >= servers.length) {
-      return;
-    }
-
-    setState(() {
-      busy = true;
-      connected = false;
-      downloadSpeed = 0;
-      uploadSpeed = 0;
-      totalDownloaded = 0;
-      totalUploaded = 0;
-      statusText = 'Connecting...';
-    });
-
-    try {
-      final server = servers[index];
-      final parsed = V2ray.parseFromURL(server.link);
-
-      final permission = await v2ray.requestPermission();
-
-      if (!permission) {
-        throw Exception('VPN permission was not granted');
-      }
-
-      await v2ray.startV2Ray(
-        remark: parsed.remark,
-        config: parsed.getFullConfiguration(),
-        blockedApps: null,
-        bypassSubnets: null,
-        proxyOnly: false,
-      );
-
-      selectedServer = index;
-
-      history.insert(0, server.name);
-
-      if (history.length > 30) {
-        history = history.take(30).toList();
-      }
-
-      await saveData();
-
-      if (mounted) {
-        setState(() {
-          statusText = connected ? 'Connected' : 'Connecting...';
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          connected = false;
-          statusText = 'Connection failed';
-        });
-      }
-
-      showMessage('Connection error: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          busy = false;
-        });
-      }
-    }
-  }
-
-  Future<void> chooseFastest() async {
-    if (busy || servers.isEmpty) {
-      showMessage('Add server configurations first');
-      return;
-    }
-
-    setState(() {
-      busy = true;
-      statusText = 'Testing servers...';
-    });
-
-    int bestIndex = -1;
-    int bestDelay = 999999;
-
-    try {
-      for (int i = 0; i < servers.length; i++) {
-        final delay = await testServer(servers[i]);
-
-        servers[i].delay = delay;
-
-        if (delay > 0 && delay < bestDelay) {
-          bestDelay = delay;
-          bestIndex = i;
-        }
-
-        if (mounted) setState(() {});
-      }
-
-      await saveData();
-
-      if (bestIndex == -1) {
-        showMessage('No working server found');
-        return;
-      }
-
-      if (mounted) {
-        setState(() {
-          busy = false;
-        });
-      }
-
-      await connectToServer(bestIndex);
-    } finally {
-      if (mounted) {
-        setState(() {
-          busy = false;
-        });
-      }
-    }
-  }
-
-  Future<void> disconnect() async {
-    try {
-      await v2ray.stopV2Ray();
-
-      if (!mounted) return;
-
-      setState(() {
-        connected = false;
-        downloadSpeed = 0;
-        uploadSpeed = 0;
-        statusText = 'Disconnected';
-      });
-    } catch (e) {
-      showMessage('Disconnect error: $e');
-    }
-  }
-
   Future<void> updateServers() async {
-    if (feedUrl.isEmpty) {
-      await configureFeed();
-      return;
+    if (busy) return;
+
+    if (feedUrl.trim().isEmpty) {
+      feedUrl = defaultServerFeedUrl;
     }
 
     if (!feedUrl.startsWith('https://')) {
@@ -667,29 +323,32 @@ class _HomePageState extends State<HomePage> {
     }
 
     try {
-      setState(() => busy = true);
+      if (mounted) setState(() => busy = true);
 
       final response = await http
-          .get(Uri.parse(feedUrl))
-          .timeout(const Duration(seconds: 20));
+          .get(
+            Uri.parse(feedUrl),
+            headers: const {'Accept': 'application/json'},
+          )
+          .timeout(const Duration(seconds: 25));
 
       if (response.statusCode != 200) {
         throw Exception('HTTP ${response.statusCode}');
       }
 
-      final data = jsonDecode(response.body);
+      final dynamic data = jsonDecode(utf8.decode(response.bodyBytes));
 
       if (data is! List) {
-        throw Exception('Invalid JSON format');
+        throw Exception('Invalid JSON format: expected a list');
       }
 
       int added = 0;
+      int updated = 0;
 
       for (final item in data) {
         if (item is! Map) continue;
 
-        final link = (item['link'] ?? '').toString();
-
+        final link = (item['link'] ?? '').toString().trim();
         final valid = link.startsWith('vless://') ||
             link.startsWith('vmess://') ||
             link.startsWith('trojan://') ||
@@ -697,23 +356,32 @@ class _HomePageState extends State<HomePage> {
 
         if (!valid) continue;
 
-        if (servers.any((s) => s.link == link)) continue;
+        final name = (item['name'] ?? 'Online server').toString();
+        final country = (item['country'] ?? 'Unknown').toString();
 
-        servers.add(
-          ServerEntry(
-            name: (item['name'] ?? 'Online server').toString(),
-            country: (item['country'] ?? 'Unknown').toString(),
-            link: link,
-          ),
-        );
+        final existingIndex =
+            servers.indexWhere((server) => server.link == link);
 
-        added++;
+        if (existingIndex >= 0) {
+          servers[existingIndex].name = name;
+          servers[existingIndex].country = country;
+          updated++;
+        } else {
+          servers.add(
+            ServerEntry(
+              name: name,
+              country: country,
+              link: link,
+            ),
+          );
+          added++;
+        }
       }
 
       await saveData();
 
       if (mounted) setState(() {});
-      showMessage('$added new servers added');
+      showMessage('Server list updated: $added added, $updated refreshed');
     } catch (e) {
       showMessage('Update failed: $e');
     } finally {
@@ -741,20 +409,17 @@ class _HomePageState extends State<HomePage> {
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(
-              context,
-              controller.text.trim(),
-            ),
+            onPressed: () =>
+                Navigator.pop(context, controller.text.trim()),
             child: const Text('Save'),
           ),
         ],
       ),
     );
 
-    if (result != null) {
+    if (result != null && result.isNotEmpty) {
       feedUrl = result;
       await saveData();
-
       if (mounted) setState(() {});
       showMessage('Feed address saved');
     }
@@ -762,11 +427,220 @@ class _HomePageState extends State<HomePage> {
     controller.dispose();
   }
 
+  Future<int> testServer(ServerEntry server) async {
+    try {
+      final parsed = V2ray.parseFromURL(server.link);
+      return await v2ray
+          .getServerDelay(config: parsed.getFullConfiguration())
+          .timeout(const Duration(seconds: 15));
+    } catch (_) {
+      return -1;
+    }
+  }
+
+  Future<void> chooseFastest() async {
+    if (busy || servers.isEmpty) {
+      showMessage('No servers available. Update the server list first.');
+      return;
+    }
+
+    setState(() {
+      busy = true;
+      statusText = 'Testing servers...';
+    });
+
+    int bestIndex = -1;
+    int bestDelay = 999999999;
+
+    try {
+      for (int i = 0; i < servers.length; i++) {
+        final delay = await testServer(servers[i]);
+        servers[i].delay = delay;
+
+        if (delay > 0 && delay < bestDelay) {
+          bestDelay = delay;
+          bestIndex = i;
+        }
+
+        if (mounted) setState(() {});
+      }
+
+      await saveData();
+
+      if (bestIndex == -1) {
+        showMessage('No responding server found');
+        if (mounted) {
+          setState(() => statusText = 'No working server');
+        }
+        return;
+      }
+
+      if (mounted) setState(() => busy = false);
+      await connectToServer(bestIndex);
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> connectToServer(int index) async {
+    if (!initialized ||
+        busy ||
+        index < 0 ||
+        index >= servers.length) {
+      return;
+    }
+
+    setState(() {
+      busy = true;
+      connected = false;
+      statusText = 'Connecting...';
+      downloadSpeed = 0;
+      uploadSpeed = 0;
+      totalDownloaded = 0;
+      totalUploaded = 0;
+    });
+
+    try {
+      final server = servers[index];
+      final parsed = V2ray.parseFromURL(server.link);
+
+      final permission = await v2ray.requestPermission();
+      if (!permission) {
+        throw Exception('VPN permission was not granted');
+      }
+
+      await v2ray.startV2Ray(
+        remark: parsed.remark,
+        config: parsed.getFullConfiguration(),
+        blockedApps: null,
+        bypassSubnets: null,
+        proxyOnly: false,
+      );
+
+      selectedServer = index;
+
+      history.insert(0, server.name);
+      if (history.length > 30) {
+        history = history.take(30).toList();
+      }
+
+      await saveData();
+
+      if (mounted) {
+        setState(() {
+          statusText = connected ? 'Connected' : 'Connecting...';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          connected = false;
+          statusText = 'Connection failed';
+        });
+      }
+      showMessage('Connection error: $e');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> disconnect() async {
+    try {
+      await v2ray.stopV2Ray();
+      if (!mounted) return;
+
+      setState(() {
+        connected = false;
+        downloadSpeed = 0;
+        uploadSpeed = 0;
+        statusText = 'Disconnected';
+      });
+    } catch (e) {
+      showMessage('Disconnect error: $e');
+    }
+  }
+
+  Future<void> addServer() async {
+    final nameController = TextEditingController();
+    final countryController = TextEditingController();
+    final linkController = TextEditingController();
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF102238),
+        title: const Text('Add server'),
+        content: SingleChildScrollView(
+          child: Column(
+            children: [
+              TextField(
+                controller: nameController,
+                decoration:
+                    const InputDecoration(labelText: 'Server name'),
+              ),
+              TextField(
+                controller: countryController,
+                decoration: const InputDecoration(labelText: 'Country'),
+              ),
+              TextField(
+                controller: linkController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'V2Ray link',
+                  hintText: 'vless:// or vmess:// or trojan:// or ss://',
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      final link = linkController.text.trim();
+      final valid = link.startsWith('vless://') ||
+          link.startsWith('vmess://') ||
+          link.startsWith('trojan://') ||
+          link.startsWith('ss://');
+
+      if (valid) {
+        servers.add(
+          ServerEntry(
+            name: nameController.text.trim().isEmpty
+                ? 'New server'
+                : nameController.text.trim(),
+            country: countryController.text.trim().isEmpty
+                ? 'Unknown'
+                : countryController.text.trim(),
+            link: link,
+          ),
+        );
+        await saveData();
+        if (mounted) setState(() {});
+        showMessage('Server saved');
+      } else {
+        showMessage('Invalid server link');
+      }
+    }
+
+    nameController.dispose();
+    countryController.dispose();
+    linkController.dispose();
+  }
+
   Future<void> toggleFavorite(int index) async {
     servers[index].favorite = !servers[index].favorite;
-
     await saveData();
-
     if (mounted) setState(() {});
   }
 
@@ -777,8 +651,77 @@ class _HomePageState extends State<HomePage> {
     if (selectedServer > index) selectedServer--;
 
     await saveData();
-
     if (mounted) setState(() {});
+  }
+
+  Future<void> refreshSpeedOrder() async {
+    if (!mounted ||
+        !speedSortEnabled ||
+        speedSortRunning ||
+        busy ||
+        servers.isEmpty) {
+      return;
+    }
+
+    speedSortRunning = true;
+    final selectedLink =
+        selectedServer >= 0 && selectedServer < servers.length
+            ? servers[selectedServer].link
+            : null;
+
+    setState(() => busy = true);
+
+    try {
+      final currentServers = List<ServerEntry>.from(servers);
+
+      for (final server in currentServers) {
+        if (!mounted || !speedSortEnabled) break;
+        server.delay = await testServer(server);
+        if (mounted) setState(() {});
+      }
+
+      if (!mounted || !speedSortEnabled) return;
+
+      servers.sort((a, b) {
+        final aDelay = a.delay > 0 ? a.delay : 999999999;
+        final bDelay = b.delay > 0 ? b.delay : 999999999;
+        return aDelay.compareTo(bDelay);
+      });
+
+      if (selectedLink != null) {
+        selectedServer =
+            servers.indexWhere((server) => server.link == selectedLink);
+      }
+
+      await saveData();
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) showMessage('Speed test error: $e');
+    } finally {
+      speedSortRunning = false;
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  void toggleSpeedSort(bool enabled) {
+    setState(() => speedSortEnabled = enabled);
+
+    speedSortTimer?.cancel();
+    speedSortTimer = null;
+
+    if (enabled) {
+      refreshSpeedOrder();
+      speedSortTimer = Timer.periodic(
+        const Duration(seconds: 30),
+        (_) {
+          if (speedSortEnabled && mounted) {
+            refreshSpeedOrder();
+          }
+        },
+      );
+    } else {
+      showMessage('Automatic speed sorting disabled');
+    }
   }
 
   Widget serverTile(int index) {
@@ -787,16 +730,13 @@ class _HomePageState extends State<HomePage> {
     return Card(
       color: const Color(0xFF102238),
       child: ListTile(
-        leading: const Icon(
-          Icons.public,
-          color: Color(0xFF00B8FF),
-        ),
+        leading: const Icon(Icons.public, color: Color(0xFF00B8FF)),
         title: Text(server.name),
         subtitle: Text(
-          '${server.country}  •  '
+          '${server.country} • '
           '${server.delay > 0 ? '${server.delay} ms' : 'Not tested'}',
         ),
-        onTap: () => connectToServer(index),
+        onTap: busy ? null : () => connectToServer(index),
         trailing: PopupMenuButton<String>(
           onSelected: (value) {
             if (value == 'favorite') toggleFavorite(index);
@@ -805,17 +745,10 @@ class _HomePageState extends State<HomePage> {
           },
           itemBuilder: (context) => [
             const PopupMenuItem(
-              value: 'connect',
-              child: Text('Connect'),
-            ),
+                value: 'connect', child: Text('Connect')),
             const PopupMenuItem(
-              value: 'favorite',
-              child: Text('Favorite'),
-            ),
-            const PopupMenuItem(
-              value: 'delete',
-              child: Text('Delete'),
-            ),
+                value: 'favorite', child: Text('Favorite')),
+            const PopupMenuItem(value: 'delete', child: Text('Delete')),
           ],
           child: Icon(
             server.favorite ? Icons.favorite : Icons.more_vert,
@@ -902,10 +835,8 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             const SizedBox(height: 15),
-            Text(
-              selectedName,
-              style: const TextStyle(color: Colors.white70),
-            ),
+            Text(selectedName,
+                style: const TextStyle(color: Colors.white70)),
             const SizedBox(height: 20),
             trafficPanel(),
             const SizedBox(height: 10),
@@ -914,6 +845,7 @@ class _HomePageState extends State<HomePage> {
               icon: const Icon(Icons.sync),
               label: const Text('Update servers'),
             ),
+            const SizedBox(height: 20),
           ],
         ),
       ),
@@ -934,9 +866,7 @@ class _HomePageState extends State<HomePage> {
                   child: Text(
                     'SERVERS',
                     style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
+                        fontSize: 20, fontWeight: FontWeight.bold),
                   ),
                 ),
                 IconButton(
@@ -950,38 +880,27 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
-
-          // Independent automatic speed sorting option.
           SwitchListTile(
-            secondary: const Icon(
-              Icons.speed,
-              color: Color(0xFF00D5FF),
-            ),
+            secondary:
+                const Icon(Icons.speed, color: Color(0xFF00D5FF)),
             title: const Text(
               'Sort by speed / به ترتیب سرعت',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             subtitle: const Text(
               'Automatic speed test every 30 seconds',
-              style: TextStyle(
-                color: Colors.white60,
-                fontSize: 11,
-              ),
+              style: TextStyle(color: Colors.white60, fontSize: 11),
             ),
             value: speedSortEnabled,
             activeColor: const Color(0xFF00D5FF),
             onChanged: toggleSpeedSort,
           ),
-
           Expanded(
             child: servers.isEmpty
-                ? const Center(
-                    child: Text('No servers added yet'),
-                  )
+                ? const Center(child: Text('No servers added yet'))
                 : ListView.builder(
                     itemCount: servers.length,
-                    itemBuilder: (context, index) =>
-                        serverTile(index),
+                    itemBuilder: (context, index) => serverTile(index),
                   ),
           ),
         ],
@@ -994,10 +913,7 @@ class _HomePageState extends State<HomePage> {
         children: [
           const Text(
             'HISTORY',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 15),
           if (history.isEmpty)
@@ -1017,10 +933,7 @@ class _HomePageState extends State<HomePage> {
       children: [
         const Text(
           'FAVORITES',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 15),
         ...servers.asMap().entries
@@ -1040,7 +953,6 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF07111F),
         title: const Text('Payam VPN'),
         actions: [
           IconButton(
