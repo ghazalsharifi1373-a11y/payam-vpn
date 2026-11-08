@@ -7,52 +7,47 @@ on:
     branches:
       - main
 
-permissions:
-  contents: read
-
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Flutter
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
-      - name: Create Android Flutter project
-        run: flutter create --platforms android --project-name payam_vpn app
+      - name: Create Android project
+        run: flutter create --org com.payamvpn --project-name payam_vpn app
 
-      - name: Copy application source
-        run: cp lib/main.dart app/lib/main.dart
+      - name: Copy app files
+        run: |
+          mkdir -p app/lib
+          cp lib/main.dart app/lib/main.dart
+          cp pubspec.yaml app/pubspec.yaml
 
-      - name: Install VPN engine
+      - name: Install dependencies
         working-directory: app
-        run: flutter pub add "flutter_v2ray_client:^3.5.0"
+        run: |
+          flutter pub add flutter_v2ray_client:^3.5.0
+          flutter pub get
 
-      - name: Resolve dependencies
-        working-directory: app
-        run: flutter pub get
-
-      - name: Build release APK
+      - name: Build APK
         working-directory: app
         run: flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Payam-VPN
+          name: Payam-VPN-Android
           path: app/build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
-          retention-days: 7
