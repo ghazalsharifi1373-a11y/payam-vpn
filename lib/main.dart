@@ -1,5 +1,7 @@
 
+import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_v2ray_client/flutter_v2ray.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -84,6 +86,11 @@ class _HomePageState extends State<HomePage> {
   bool busy = false;
   bool connected = false;
 
+  // Automatic speed sorting
+  bool speedSortEnabled = false;
+  bool speedSortRunning = false;
+  Timer? speedSortTimer;
+
   String statusText = 'Disconnected';
   String feedUrl = '';
 
@@ -100,11 +107,7 @@ class _HomePageState extends State<HomePage> {
       onStatusChanged: (status) {
         if (!mounted) return;
 
-        final state = status.state
-            .toString()
-            .toLowerCase()
-            .trim();
-
+        final state = status.state.toString().toLowerCase().trim();
         final stateName = state.split('.').last;
 
         setState(() {
@@ -418,6 +421,100 @@ class _HomePageState extends State<HomePage> {
           .timeout(const Duration(seconds: 15));
     } catch (_) {
       return -1;
+    }
+  }
+
+  // Tests all servers and sorts them from lowest ping to highest ping.
+  Future<void> refreshSpeedOrder() async {
+    if (!mounted ||
+        !speedSortEnabled ||
+        speedSortRunning ||
+        busy ||
+        servers.isEmpty) {
+      return;
+    }
+
+    speedSortRunning = true;
+
+    final selectedLink =
+        selectedServer >= 0 && selectedServer < servers.length
+            ? servers[selectedServer].link
+            : null;
+
+    setState(() {
+      busy = true;
+    });
+
+    try {
+      final currentServers = List<ServerEntry>.from(servers);
+
+      for (final server in currentServers) {
+        if (!mounted || !speedSortEnabled) break;
+
+        final delay = await testServer(server);
+        server.delay = delay;
+
+        if (mounted) {
+          setState(() {});
+        }
+      }
+
+      if (!mounted || !speedSortEnabled) return;
+
+      servers.sort((a, b) {
+        final aDelay = a.delay > 0 ? a.delay : 999999999;
+        final bDelay = b.delay > 0 ? b.delay : 999999999;
+
+        return aDelay.compareTo(bDelay);
+      });
+
+      if (selectedLink != null) {
+        selectedServer =
+            servers.indexWhere((s) => s.link == selectedLink);
+      }
+
+      await saveData();
+
+      if (mounted) {
+        setState(() {});
+        showMessage('Server speed order updated');
+      }
+    } catch (e) {
+      if (mounted) {
+        showMessage('Speed test error: $e');
+      }
+    } finally {
+      speedSortRunning = false;
+
+      if (mounted) {
+        setState(() {
+          busy = false;
+        });
+      }
+    }
+  }
+
+  void toggleSpeedSort(bool enabled) {
+    setState(() {
+      speedSortEnabled = enabled;
+    });
+
+    speedSortTimer?.cancel();
+    speedSortTimer = null;
+
+    if (enabled) {
+      refreshSpeedOrder();
+
+      speedSortTimer = Timer.periodic(
+        const Duration(seconds: 30),
+        (_) {
+          if (speedSortEnabled && mounted) {
+            refreshSpeedOrder();
+          }
+        },
+      );
+    } else {
+      showMessage('Automatic speed sorting disabled');
     }
   }
 
@@ -843,16 +940,39 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 IconButton(
-                  onPressed: addServer,
+                  onPressed: busy ? null : addServer,
                   icon: const Icon(Icons.add_circle),
                 ),
                 IconButton(
-                  onPressed: updateServers,
+                  onPressed: busy ? null : updateServers,
                   icon: const Icon(Icons.sync),
                 ),
               ],
             ),
           ),
+
+          // Independent automatic speed sorting option.
+          SwitchListTile(
+            secondary: const Icon(
+              Icons.speed,
+              color: Color(0xFF00D5FF),
+            ),
+            title: const Text(
+              'Sort by speed / به ترتیب سرعت',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            subtitle: const Text(
+              'Automatic speed test every 30 seconds',
+              style: TextStyle(
+                color: Colors.white60,
+                fontSize: 11,
+              ),
+            ),
+            value: speedSortEnabled,
+            activeColor: const Color(0xFF00D5FF),
+            onChanged: toggleSpeedSort,
+          ),
+
           Expanded(
             child: servers.isEmpty
                 ? const Center(
@@ -908,6 +1028,12 @@ class _HomePageState extends State<HomePage> {
             .map((entry) => serverTile(entry.key)),
       ],
     );
+  }
+
+  @override
+  void dispose() {
+    speedSortTimer?.cancel();
+    super.dispose();
   }
 
   @override
