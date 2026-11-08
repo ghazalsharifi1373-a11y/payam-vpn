@@ -1,1 +1,62 @@
-[]
+[
+  {
+    "name": "United States • TROJAN 1",
+    "country": "United States",
+    "link": "trojan://242a3d8eee5e4ed1a6bfa4141d549a25@216.106.186.66:443?security=tls&insecure=0&headerType=none&type=tcp&allowInsecure=0&sni=www.findlocaljobnetworkandbuildcommunityconnections.com#US 🇺🇸 | @Raydikalx | 280D3F"
+  },
+  {
+    "name": "United States • TROJAN 2",
+    "country": "United States",
+    "link": "trojan://0ab6c98dae3b48e8b9c4a776b6c9c19a@216.106.186.82:443?allowInsecure=0&sni=courses.findlocaljobnetworkandbuildcommunityconnections.com#US 🇺🇸 | @Raydikalx | D429FC"
+  },
+  {
+    "name": "United States • TROJAN 3",
+    "country": "United States",
+    "link": "trojan://0ab6c98dae3b48e8b9c4a776b6c9c19a@216.106.186.46:443?security=tls&insecure=0&headerType=none&fp=firefox&type=tcp&allowInsecure=0&sni=cdn.findlocaljobnetworkandbuildcommunityconnections.com#US 🇺🇸 | @Raydikalx | FB18EA"
+  },
+  {
+    "name": "United States • TROJAN 4",
+    "country": "United States",
+    "link": "trojan://0ab6c98dae3b48e8b9c4a776b6c9c19a@216.106.186.32:443?sni=blog.findlocaljobnetworkandbuildcommunityconnections.com#US 🇺🇸 | @Raydikalx | 6275F3"
+  },
+  {
+    "name": "United States • TROJAN 5",
+    "country": "United States",
+    "link": "trojan://0ab6c98dae3b48e8b9c4a776b6c9c19a@216.106.186.155:443?security=tls&fp=chrome&sni=api.findlocaljobnetworkandbuildcommunityconnections.com#US 🇺🇸 | @Raydikalx | 412F3F"
+  },
+  {
+    "name": "United States • SS 6",
+    "country": "United States",
+    "link": "ss://YWVzLTI1Ni1nY206WlJwZ2FCZUd4dEVOSVhndmhwa1pCS3o5R25XUlMyZFljeDlPK2EyaXdOND0@38.143.66.146:19999#US 🇺🇸 | @Raydikalx | 275DD2"
+  },
+  {
+    "name": "United States • TROJAN 7",
+    "country": "United States",
+    "link": "trojan://0ab6c98dae3b48e8b9c4a776b6c9c19a@216.106.186.33:443?security=tls&fp=chrome&sni=resources.findlocaljobnetworkandbuildcommunityconnections.com#US 🇺🇸 | @Raydikalx | A0C347"
+  },
+  {
+    "name": "Canada • SS 8",
+    "country": "Canada",
+    "link": "ss://YWVzLTEyOC1nY206c2hhZG93c29ja3M@149.22.95.183:443#CA 🇨🇦 | @Raydikalx | DEBC1A"
+  },
+  {
+    "name": "United States • VLESS 9",
+    "country": "United States",
+    "link": "vless://48ff2b70-e180-582f-8866-d9a2edeed5f5@15.204.97.198:23576?security=reality&type=raw&sni=fuck.rkn&fp=chrome&flow=xtls-rprx-vision&sid=01&pbk=1y5h2FGWKXTJ9xLPCqPo6Mw7RxoZzh6fGkEQKNxpZ3s&encryption=none#US 🇺🇸 | @Raydikalx | 91D02A"
+  },
+  {
+    "name": "United States • VLESS 10",
+    "country": "United States",
+    "link": "vless://48ff2b70-e180-582f-8866-d9a2edeed5f5@15.204.97.214:23576?security=reality&type=tcp&sni=fuck.rkn&fp=random&flow=xtls-rprx-vision&pbk=1y5h2FGWKXTJ9xLPCqPo6Mw7RxoZzh6fGkEQKNxpZ3s#US 🇺🇸 | @Raydikalx | 004A5D"
+  },
+  {
+    "name": "United States • VLESS 11",
+    "country": "United States",
+    "link": "vless://48ff2b70-e180-582f-8866-d9a2edeed5f5@15.204.97.195:23576/?type=tcp&encryption=none&flow=xtls-rprx-vision&sni=fuck.rkn&alpn=networld_vpn-channel@.networld_vpn-channel@.networld_vpn-channel@.networld_vpn-channel@.networld_vpn-channel@.networld_vpn-channel@.networld_vpn-&fp=chrome&security=reality&pbk=1y5h2FGWKXTJ9xLPCqPo6Mw7RxoZzh6fGkEQKNxpZ3s&sid=01#US 🇺🇸 | @Raydikalx | 168CE3"
+  },
+  {
+    "name": "United States • VLESS 12",
+    "country": "United States",
+    "link": "vless://48ff2b70-e180-582f-8866-d9a2edeed5f5@15.204.97.219:23576?type=tcp&encryption=none&flow=xtls-rprx-vision&sni=fuck.rkn&fp=chrome&security=reality&pbk=1y5h2FGWKXTJ9xLPCqPo6Mw7RxoZzh6fGkEQKNxpZ3s&sid=01#US 🇺🇸 | @Raydikalx | 1EC5C2"
+  }
+]
