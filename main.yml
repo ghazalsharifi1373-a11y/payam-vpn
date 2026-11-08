@@ -4,15 +4,19 @@ name: Build Payam VPN APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: subosito/flutter-action@v2
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
         with:
           channel: stable
 
@@ -22,18 +26,16 @@ jobs:
       - name: Copy app screen
         run: cp lib/main.dart app/lib/main.dart
 
-      - name: Copy dependencies
-        run: cp pubspec.yaml app/pubspec.yaml
-
-      - name: Install dependencies
+      - name: Install VPN engine
         working-directory: app
-        run: flutter pub get
+        run: flutter pub add flutter_v2ray_client:^3.5.0
 
       - name: Build APK
         working-directory: app
         run: flutter build apk --release
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: Payam-VPN
           path: app/build/app/outputs/flutter-apk/app-release.apk
