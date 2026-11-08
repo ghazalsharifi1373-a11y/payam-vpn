@@ -1,87 +1,134 @@
-
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_v2ray_client/flutter_v2ray.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const PayamVPN());
+  runApp(const PayamApp());
 }
 
-class PayamVPN extends StatelessWidget {
-  const PayamVPN({super.key});
+class ServerEntry {
+  String name;
+  String country;
+  String link;
+  bool favorite;
+  int delay;
+
+  ServerEntry({
+    required this.name,
+    required this.country,
+    required this.link,
+    this.favorite = false,
+    this.delay = -1,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'country': country,
+    'link': link,
+    'favorite': favorite,
+    'delay': delay,
+  };
+
+  factory ServerEntry.fromJson(Map<String, dynamic> json) {
+    return ServerEntry(
+      name: json['name'] ?? 'Server',
+      country: json['country'] ?? 'Unknown',
+      link: json['link'] ?? '',
+      favorite: json['favorite'] ?? false,
+      delay: json['delay'] ?? -1,
+    );
+  }
+}
+
+class PayamApp extends StatelessWidget {
+  const PayamApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Payam VPN',
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF030817),
-        useMaterial3: true,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xFF07111F),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF00B8FF),
+          secondary: Color(0xFF00D5FF),
+        ),
       ),
-      home: const VPNHome(),
+      home: const HomePage(),
     );
   }
 }
 
-class VPNHome extends StatefulWidget {
-  const VPNHome({super.key});
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
 
   @override
-  State<VPNHome> createState() => _VPNHomeState();
+  State<HomePage> createState() => _HomePageState();
 }
 
-class _VPNHomeState extends State<VPNHome> {
+class _HomePageState extends State<HomePage> {
   late final V2ray v2ray;
-  final TextEditingController configController =
-      TextEditingController();
+
+  List<ServerEntry> servers = [];
+  List<String> history = [];
+
+  int selectedTab = 0;
+  int selectedServer = -1;
 
   bool initialized = false;
   bool busy = false;
-  bool connecting = false;
   bool connected = false;
 
-  int selectedTab = 0;
-  String message = 'در حال آماده‌سازی موتور اتصال';
-
-  static const Color blue = Color(0xFF087BFF);
-  static const Color cyan = Color(0xFF00C8FF);
-  static const Color green = Color(0xFF00E85D);
-  static const Color background = Color(0xFF030817);
+  String statusText = 'Disconnected';
+  String feedUrl = '';
 
   @override
   void initState() {
     super.initState();
 
     v2ray = V2ray(
-      onStatusChanged: (value) {
+      onStatusChanged: (status) {
         if (!mounted) return;
 
-        final state = value.state.toString().toLowerCase();
+        final state = status.state.toString().toLowerCase();
 
         setState(() {
-          connected = state.contains('connected') &&
-              !state.contains('disconnected');
+          statusText = status.state.toString();
 
-          connecting = state.contains('connecting');
-
-          if (connected) {
-            message = 'اتصال برقرار است';
-          } else if (connecting) {
-            message = 'در حال اتصال...';
+          if (state.contains('connected')) {
+            connected = true;
           } else if (state.contains('disconnect')) {
-            message = 'اتصال قطع است';
+            connected = false;
           }
         });
       },
     );
 
-    initializeVPN();
+    initializeApp();
   }
 
-  Future<void> initializeVPN() async {
+  Future<void> initializeApp() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+
+      final savedServers = prefs.getString('servers') ?? '[]';
+      final savedHistory = prefs.getStringList('history') ?? [];
+
+      final decoded = jsonDecode(savedServers) as List;
+
+      servers = decoded
+          .map((item) => ServerEntry.fromJson(
+                Map<String, dynamic>.from(item),
+              ))
+          .toList();
+
+      history = savedHistory;
+      feedUrl = prefs.getString('feedUrl') ?? '';
+
       await v2ray.initialize(
         notificationIconResourceType: 'mipmap',
         notificationIconResourceName: 'ic_launcher',
@@ -91,90 +138,174 @@ class _VPNHomeState extends State<VPNHome> {
 
       setState(() {
         initialized = true;
-        message = 'آماده اتصال';
       });
     } catch (e) {
       if (!mounted) return;
-
-      setState(() {
-        message = 'خطا در آماده‌سازی موتور VPN';
-      });
+      showMessage('Initialization error: $e');
     }
   }
 
-  Future<void> connectVPN() async {
-    final link = configController.text.trim();
+  Future<void> saveData() async {
+    final prefs = await SharedPreferences.getInstance();
 
-    if (link.isEmpty) {
-      await showConfigDialog();
-      return;
+    await prefs.setString(
+      'servers',
+      jsonEncode(servers.map((s) => s.toJson()).toList()),
+    );
+
+    await prefs.setStringList('history', history);
+    await prefs.setString('feedUrl', feedUrl);
+  }
+
+  void showMessage(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: const Color(0xFF12334A),
+      ),
+    );
+  }
+
+  Future<void> addServer() async {
+    final nameController = TextEditingController();
+    final countryController = TextEditingController();
+    final linkController = TextEditingController();
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF102238),
+        title: const Text('Add server'),
+        content: SingleChildScrollView(
+          child: Column(
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Server name',
+                ),
+              ),
+              TextField(
+                controller: countryController,
+                decoration: const InputDecoration(
+                  labelText: 'Country',
+                ),
+              ),
+              TextField(
+                controller: linkController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'V2Ray link',
+                  hintText: 'vless:// or vmess:// or trojan://',
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      final link = linkController.text.trim();
+
+      if (link.startsWith('vless://') ||
+          link.startsWith('vmess://') ||
+          link.startsWith('trojan://') ||
+          link.startsWith('ss://')) {
+        servers.add(
+          ServerEntry(
+            name: nameController.text.trim().isEmpty
+                ? 'New server'
+                : nameController.text.trim(),
+            country: countryController.text.trim().isEmpty
+                ? 'Unknown'
+                : countryController.text.trim(),
+            link: link,
+          ),
+        );
+
+        await saveData();
+
+        if (mounted) setState(() {});
+        showMessage('Server saved');
+      } else {
+        showMessage('Invalid server link');
+      }
     }
 
-    if (!initialized || busy || connected || connecting) {
+    nameController.dispose();
+    countryController.dispose();
+    linkController.dispose();
+  }
+
+  Future<int> testServer(ServerEntry server) async {
+    try {
+      final parsed = V2ray.parseFromURL(server.link);
+      return await v2ray
+          .getServerDelay(config: parsed.getFullConfiguration())
+          .timeout(const Duration(seconds: 15));
+    } catch (_) {
+      return -1;
+    }
+  }
+
+  Future<void> connectToServer(int index) async {
+    if (!initialized || busy || index < 0 || index >= servers.length) {
       return;
     }
 
     setState(() {
       busy = true;
-      connecting = true;
-      message = 'در حال بررسی سرور...';
+      statusText = 'Connecting...';
     });
 
     try {
-      final parsed = V2ray.parseFromURL(link);
-      final config = parsed.getFullConfiguration();
-
-      final delay = await v2ray.getServerDelay(
-        config: config,
-      );
-
-      if (!mounted) return;
-
-      if (delay <= 0) {
-        setState(() {
-          connecting = false;
-          message = 'سرور پاسخ نمی‌دهد';
-        });
-        return;
-      }
-
-      setState(() {
-        message = 'سرور آماده است؛ در حال اتصال...';
-      });
+      final server = servers[index];
+      final parsed = V2ray.parseFromURL(server.link);
 
       final permission = await v2ray.requestPermission();
 
       if (!permission) {
-        if (!mounted) return;
-
-        setState(() {
-          connecting = false;
-          message = 'اجازه اتصال VPN داده نشد';
-        });
+        showMessage('VPN permission was not granted');
         return;
       }
 
       await v2ray.startV2Ray(
         remark: parsed.remark,
-        config: config,
+        config: parsed.getFullConfiguration(),
         blockedApps: null,
         bypassSubnets: null,
         proxyOnly: false,
       );
 
-      if (!mounted) return;
+      selectedServer = index;
 
-      setState(() {
-        message = 'درخواست اتصال ارسال شد';
-      });
+      history.insert(0, server.name);
+      if (history.length > 30) {
+        history = history.take(30).toList();
+      }
+
+      await saveData();
+
+      if (mounted) {
+        setState(() {
+          statusText = 'Connection requested';
+        });
+      }
     } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        connecting = false;
-        connected = false;
-        message = 'خطا در اتصال؛ کانفیگ را بررسی کن';
-      });
+      showMessage('Connection error: $e');
     } finally {
       if (mounted) {
         setState(() {
@@ -184,468 +315,462 @@ class _VPNHomeState extends State<VPNHome> {
     }
   }
 
-  void disconnectVPN() {
-    try {
-      v2ray.stopV2Ray();
+  Future<void> chooseFastest() async {
+    if (busy || servers.isEmpty) {
+      showMessage('Add server configurations first');
+      return;
+    }
 
-      setState(() {
-        connected = false;
-        connecting = false;
-        message = 'اتصال قطع شد';
-      });
-    } catch (e) {
-      setState(() {
-        message = 'خطا در قطع اتصال';
-      });
+    setState(() {
+      busy = true;
+      statusText = 'Testing servers...';
+    });
+
+    int bestIndex = -1;
+    int bestDelay = 999999;
+
+    try {
+      for (int i = 0; i < servers.length; i++) {
+        final delay = await testServer(servers[i]);
+
+        servers[i].delay = delay;
+
+        if (delay > 0 && delay < bestDelay) {
+          bestDelay = delay;
+          bestIndex = i;
+        }
+
+        if (mounted) setState(() {});
+      }
+
+      await saveData();
+
+      if (bestIndex == -1) {
+        showMessage('No working server found');
+        return;
+      }
+
+      if (mounted) {
+        setState(() {
+          busy = false;
+        });
+      }
+
+      await connectToServer(bestIndex);
+    } finally {
+      if (mounted) {
+        setState(() {
+          busy = false;
+        });
+      }
     }
   }
 
-  Future<void> showConfigDialog() async {
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF101C36),
-          title: const Text('افزودن کانفیگ سرور'),
-          content: TextField(
-            controller: configController,
-            maxLines: 5,
-            style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              hintText: 'لینک VLESS / VMess / Trojan / SS',
-              hintStyle: const TextStyle(
-                color: Colors.white54,
-              ),
-              filled: true,
-              fillColor: const Color(0xFF071329),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
+  Future<void> disconnect() async {
+    try {
+      await v2ray.stopV2Ray();
+
+      if (!mounted) return;
+
+      setState(() {
+        connected = false;
+        statusText = 'Disconnected';
+      });
+    } catch (e) {
+      showMessage('Disconnect error: $e');
+    }
+  }
+
+  Future<void> updateServers() async {
+    if (feedUrl.isEmpty) {
+      await configureFeed();
+      return;
+    }
+
+    if (!feedUrl.startsWith('https://')) {
+      showMessage('Feed address must use HTTPS');
+      return;
+    }
+
+    try {
+      setState(() => busy = true);
+
+      final response = await http
+          .get(Uri.parse(feedUrl))
+          .timeout(const Duration(seconds: 20));
+
+      if (response.statusCode != 200) {
+        throw Exception('HTTP ${response.statusCode}');
+      }
+
+      final data = jsonDecode(response.body);
+
+      if (data is! List) {
+        throw Exception('Invalid JSON format');
+      }
+
+      int added = 0;
+
+      for (final item in data) {
+        if (item is! Map) continue;
+
+        final link = (item['link'] ?? '').toString();
+
+        final valid = link.startsWith('vless://') ||
+            link.startsWith('vmess://') ||
+            link.startsWith('trojan://') ||
+            link.startsWith('ss://');
+
+        if (!valid) continue;
+
+        if (servers.any((s) => s.link == link)) continue;
+
+        servers.add(
+          ServerEntry(
+            name: (item['name'] ?? 'Online server').toString(),
+            country: (item['country'] ?? 'Unknown').toString(),
+            link: link,
           ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-              },
-              child: const Text('انصراف'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-                setState(() {
-                  message = 'کانفیگ ذخیره شد';
-                });
-              },
-              child: const Text('ذخیره'),
-            ),
-          ],
         );
-      },
-    );
+
+        added++;
+      }
+
+      await saveData();
+
+      if (mounted) setState(() {});
+      showMessage('$added new servers added');
+    } catch (e) {
+      showMessage('Update failed: $e');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
   }
 
-  @override
-  void dispose() {
-    configController.dispose();
-    super.dispose();
-  }
+  Future<void> configureFeed() async {
+    final controller = TextEditingController(text: feedUrl);
 
-  @override
-  Widget build(BuildContext context) {
-    final accent = connected ? green : cyan;
-
-    return Scaffold(
-      backgroundColor: background,
-      body: Stack(
-        children: [
-          const Positioned.fill(
-            child: WorldBackground(),
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF102238),
+        title: const Text('Server feed URL'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            hintText: 'https://example.com/servers.json',
           ),
-          SafeArea(
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 8,
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'PAYAM VPN',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 21,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 2,
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: showConfigDialog,
-                        icon: const Icon(
-                          Icons.settings,
-                          color: Colors.white,
-                          size: 27,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                Container(
-                  height: 150,
-                  alignment: Alignment.center,
-                  child: const Text(
-                    '🦉',
-                    style: TextStyle(
-                      fontSize: 112,
-                      shadows: [
-                        Shadow(
-                          color: blue,
-                          blurRadius: 35,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                Container(
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 25,
-                  ),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xCC07142C),
-                    borderRadius: BorderRadius.circular(25),
-                    border: Border.all(
-                      color: accent,
-                      width: 1.5,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        connected
-                            ? Icons.check_circle
-                            : Icons.wifi,
-                        color: accent,
-                        size: 25,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          connected
-                              ? 'CONNECTED'
-                              : connecting
-                                  ? 'CONNECTING'
-                                  : 'NOT CONNECTED',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 28),
-
-                GestureDetector(
-                  onTap: connected
-                      ? disconnectVPN
-                      : connecting || busy
-                          ? null
-                          : connectVPN,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 300),
-                    width: 205,
-                    height: 205,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: const Color(0xFF06142D),
-                      border: Border.all(
-                        color: accent,
-                        width: 5,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: accent.withOpacity(0.55),
-                          blurRadius: 35,
-                          spreadRadius: 5,
-                        ),
-                      ],
-                    ),
-                    child: Center(
-                      child: connecting || busy
-                          ? const CircularProgressIndicator(
-                              color: cyan,
-                              strokeWidth: 5,
-                            )
-                          : Icon(
-                              Icons.power_settings_new,
-                              size: 90,
-                              color: connected
-                                  ? green
-                                  : Colors.white,
-                            ),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 17),
-
-                Text(
-                  connected
-                      ? 'Tap to Disconnect'
-                      : connecting
-                          ? 'Please Wait...'
-                          : 'Tap to Connect',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-
-                const SizedBox(height: 25),
-
-                InkWell(
-                  onTap: showConfigDialog,
-                  borderRadius: BorderRadius.circular(22),
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(
-                      horizontal: 25,
-                    ),
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xCC07142C),
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(
-                        color: blue,
-                        width: 1.5,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.public,
-                          color: cyan,
-                          size: 42,
-                        ),
-                        const SizedBox(width: 15),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Server Selection',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              SizedBox(height: 4),
-                              Text(
-                                'Add or change server config',
-                                style: TextStyle(
-                                  color: Colors.lightBlueAccent,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const Icon(
-                          Icons.chevron_right,
-                          color: cyan,
-                          size: 30,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                const Spacer(),
-
-                Container(
-                  margin: const EdgeInsets.fromLTRB(
-                    15, 0, 15, 12,
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xE9081730),
-                    borderRadius: BorderRadius.circular(25),
-                    border: Border.all(
-                      color: blue,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment:
-                        MainAxisAlignment.spaceEvenly,
-                    children: [
-                      navItem(Icons.bolt, 'Speed', 0),
-                      navItem(
-                        Icons.dns,
-                        'Servers',
-                        1,
-                      ),
-                      navItem(
-                        Icons.history,
-                        'History',
-                        2,
-                      ),
-                      navItem(
-                        Icons.star,
-                        'Favorites',
-                        3,
-                      ),
-                    ],
-                  ),
-                ),
-
-                Padding(
-                  padding: const EdgeInsets.only(
-                    bottom: 5,
-                    left: 12,
-                    right: 12,
-                  ),
-                  child: Text(
-                    initialized
-                        ? message
-                        : 'در انتظار آماده‌سازی موتور VPN',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: accent,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-              ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(
+              context,
+              controller.text.trim(),
             ),
+            child: const Text('Save'),
           ),
         ],
       ),
     );
+
+    if (result != null) {
+      feedUrl = result;
+      await saveData();
+      if (mounted) setState(() {});
+      showMessage('Feed address saved');
+    }
+
+    controller.dispose();
   }
 
-  Widget navItem(
-    IconData icon,
-    String label,
-    int index,
-  ) {
-    final selected = selectedTab == index;
+  Future<void> toggleFavorite(int index) async {
+    servers[index].favorite = !servers[index].favorite;
+    await saveData();
+    if (mounted) setState(() {});
+  }
 
-    return InkWell(
-      onTap: () {
-        setState(() {
-          selectedTab = index;
-        });
+  Future<void> removeServer(int index) async {
+    servers.removeAt(index);
 
-        if (index == 1) {
-          showConfigDialog();
-        }
-      },
-      borderRadius: BorderRadius.circular(15),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 7,
-          vertical: 3,
+    if (selectedServer == index) selectedServer = -1;
+    if (selectedServer > index) selectedServer--;
+
+    await saveData();
+    if (mounted) setState(() {});
+  }
+
+  Widget serverTile(int index) {
+    final server = servers[index];
+
+    return Card(
+      color: const Color(0xFF102238),
+      child: ListTile(
+        leading: const Icon(
+          Icons.public,
+          color: Color(0xFF00B8FF),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 27,
-              color: selected ? cyan : Colors.lightBlueAccent,
+        title: Text(server.name),
+        subtitle: Text(
+          '${server.country}  •  ${server.delay > 0 ? '${server.delay} ms' : 'Not tested'}',
+        ),
+        onTap: () => connectToServer(index),
+        trailing: PopupMenuButton<String>(
+          onSelected: (value) {
+            if (value == 'favorite') toggleFavorite(index);
+            if (value == 'delete') removeServer(index);
+            if (value == 'connect') connectToServer(index);
+          },
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 'connect',
+              child: Text('Connect'),
             ),
-            const SizedBox(height: 4),
-            Text(
-              label,
+            const PopupMenuItem(
+              value: 'favorite',
+              child: Text('Favorite'),
+            ),
+            const PopupMenuItem(
+              value: 'delete',
+              child: Text('Delete'),
+            ),
+          ],
+          child: Icon(
+            server.favorite ? Icons.favorite : Icons.more_vert,
+            color: server.favorite ? Colors.redAccent : Colors.white70,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget homeView() {
+    final selectedName = selectedServer >= 0 &&
+            selectedServer < servers.length
+        ? servers[selectedServer].name
+        : 'Automatic server selection';
+
+    return Center(
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            const SizedBox(height: 25),
+            const Icon(
+              Icons.travel_explore,
+              size: 100,
+              color: Color(0xFF00B8FF),
+            ),
+            const SizedBox(height: 15),
+            const Text(
+              'PAYAM VPN',
               style: TextStyle(
-                color: selected ? cyan : Colors.lightBlueAccent,
-                fontSize: 12,
-                fontWeight: selected
-                    ? FontWeight.bold
-                    : FontWeight.normal,
+                fontSize: 25,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 4,
               ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              statusText,
+              style: const TextStyle(
+                color: Color(0xFF00D5FF),
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 28),
+            GestureDetector(
+              onTap: busy
+                  ? null
+                  : connected
+                      ? disconnect
+                      : chooseFastest,
+              child: Container(
+                width: 170,
+                height: 170,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFF102C46),
+                  border: Border.all(
+                    color: const Color(0xFF00B8FF),
+                    width: 3,
+                  ),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x6600B8FF),
+                      blurRadius: 30,
+                      spreadRadius: 4,
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  busy
+                      ? Icons.hourglass_top
+                      : connected
+                          ? Icons.power_settings_new
+                          : Icons.power_settings_new,
+                  size: 75,
+                  color: const Color(0xFF00D5FF),
+                ),
+              ),
+            ),
+            const SizedBox(height: 25),
+            Text(
+              connected ? 'CONNECTED' : 'TAP TO CONNECT',
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 15),
+            Text(
+              selectedName,
+              style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 25),
+            OutlinedButton.icon(
+              onPressed: busy ? null : updateServers,
+              icon: const Icon(Icons.sync),
+              label: const Text('Update servers'),
             ),
           ],
         ),
       ),
     );
   }
-}
 
-class WorldBackground extends StatelessWidget {
-  const WorldBackground({super.key});
+  Widget currentView() {
+    if (selectedTab == 0) return homeView();
 
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Color(0xFF020612),
-                Color(0xFF06132B),
-                Color(0xFF020612),
+    if (selectedTab == 1) {
+      return Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'SERVERS',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: addServer,
+                  icon: const Icon(Icons.add_circle),
+                ),
+                IconButton(
+                  onPressed: updateServers,
+                  icon: const Icon(Icons.sync),
+                ),
               ],
             ),
           ),
-          child: SizedBox.expand(),
-        ),
-        Positioned(
-          top: 140,
-          left: -80,
-          right: -80,
-          child: Container(
-            height: 320,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: [
-                  const Color(0xFF0755C9).withOpacity(0.30),
-                  Colors.transparent,
-                ],
-              ),
+          Expanded(
+            child: servers.isEmpty
+                ? const Center(
+                    child: Text('No servers added yet'),
+                  )
+                : ListView.builder(
+                    itemCount: servers.length,
+                    itemBuilder: (context, index) => serverTile(index),
+                  ),
+          ),
+        ],
+      );
+    }
+
+    if (selectedTab == 2) {
+      return ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          const Text(
+            'HISTORY',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
             ),
           ),
-        ),
-        Positioned(
-          bottom: 0,
-          left: -60,
-          right: -60,
-          child: Container(
-            height: 220,
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                colors: [
-                  const Color(0xFF006BFF).withOpacity(0.22),
-                  Colors.transparent,
-                ],
-              ),
+          const SizedBox(height: 15),
+          if (history.isEmpty)
+            const Center(child: Text('No connection history')),
+          ...history.map(
+            (item) => ListTile(
+              leading: const Icon(Icons.history),
+              title: Text(item),
             ),
           ),
+        ],
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const Text(
+          'FAVORITES',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
         ),
+        const SizedBox(height: 15),
+        ...servers.asMap().entries
+            .where((entry) => entry.value.favorite)
+            .map((entry) => serverTile(entry.key)),
       ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF07111F),
+        title: const Text('Payam VPN'),
+        actions: [
+          IconButton(
+            onPressed: configureFeed,
+            icon: const Icon(Icons.settings),
+          ),
+        ],
+      ),
+      body: !initialized
+          ? const Center(child: CircularProgressIndicator())
+          : currentView(),
+      bottomNavigationBar: NavigationBar(
+        backgroundColor: const Color(0xFF102238),
+        selectedIndex: selectedTab,
+        onDestinationSelected: (index) {
+          setState(() => selectedTab = index);
+        },
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: 'Home',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.dns_outlined),
+            selectedIcon: Icon(Icons.dns),
+            label: 'Servers',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.history),
+            label: 'History',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.favorite_border),
+            selectedIcon: Icon(Icons.favorite),
+            label: 'Favorites',
+          ),
+        ],
+      ),
     );
   }
 }
