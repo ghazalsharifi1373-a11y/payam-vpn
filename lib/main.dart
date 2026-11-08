@@ -87,6 +87,11 @@ class _HomePageState extends State<HomePage> {
   String statusText = 'Disconnected';
   String feedUrl = '';
 
+  int downloadSpeed = 0;
+  int uploadSpeed = 0;
+  int totalDownloaded = 0;
+  int totalUploaded = 0;
+
   @override
   void initState() {
     super.initState();
@@ -103,6 +108,11 @@ class _HomePageState extends State<HomePage> {
         final stateName = state.split('.').last;
 
         setState(() {
+          downloadSpeed = status.downloadSpeed;
+          uploadSpeed = status.uploadSpeed;
+          totalDownloaded = status.download;
+          totalUploaded = status.upload;
+
           if (stateName == 'connected') {
             connected = true;
             statusText = 'Connected';
@@ -175,6 +185,142 @@ class _HomePageState extends State<HomePage> {
       SnackBar(
         content: Text(message),
         backgroundColor: const Color(0xFF12334A),
+      ),
+    );
+  }
+
+  String formatRate(int bytesPerSecond) {
+    if (bytesPerSecond < 1024) {
+      return '$bytesPerSecond B/s';
+    }
+
+    if (bytesPerSecond < 1024 * 1024) {
+      return '${(bytesPerSecond / 1024).toStringAsFixed(1)} KB/s';
+    }
+
+    return '${(bytesPerSecond / (1024 * 1024)).toStringAsFixed(2)} MB/s';
+  }
+
+  String formatData(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    }
+
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+  }
+
+  Widget trafficPanel() {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 22),
+      color: const Color(0xFF102238),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            const Text(
+              'LIVE TRAFFIC',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.2,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    children: [
+                      const Icon(
+                        Icons.arrow_downward,
+                        color: Color(0xFF00D5FF),
+                      ),
+                      const SizedBox(height: 5),
+                      const Text(
+                        'DOWNLOAD',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        connected ? formatRate(downloadSpeed) : '--',
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF00D5FF),
+                        ),
+                      ),
+                      Text(
+                        'Total: ${formatData(totalDownloaded)}',
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  width: 1,
+                  height: 75,
+                  color: Colors.white24,
+                ),
+                Expanded(
+                  child: Column(
+                    children: [
+                      const Icon(
+                        Icons.arrow_upward,
+                        color: Color(0xFF48D6A5),
+                      ),
+                      const SizedBox(height: 5),
+                      const Text(
+                        'UPLOAD',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        connected ? formatRate(uploadSpeed) : '--',
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF48D6A5),
+                        ),
+                      ),
+                      Text(
+                        'Total: ${formatData(totalUploaded)}',
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (!connected)
+              const Padding(
+                padding: EdgeInsets.only(top: 10),
+                child: Text(
+                  'Connect to see live speed',
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -286,6 +432,10 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       busy = true;
       connected = false;
+      downloadSpeed = 0;
+      uploadSpeed = 0;
+      totalDownloaded = 0;
+      totalUploaded = 0;
       statusText = 'Connecting...';
     });
 
@@ -399,6 +549,8 @@ class _HomePageState extends State<HomePage> {
 
       setState(() {
         connected = false;
+        downloadSpeed = 0;
+        uploadSpeed = 0;
         statusText = 'Disconnected';
       });
     } catch (e) {
@@ -657,7 +809,9 @@ class _HomePageState extends State<HomePage> {
               selectedName,
               style: const TextStyle(color: Colors.white70),
             ),
-            const SizedBox(height: 25),
+            const SizedBox(height: 20),
+            trafficPanel(),
+            const SizedBox(height: 10),
             OutlinedButton.icon(
               onPressed: busy ? null : updateServers,
               icon: const Icon(Icons.sync),
