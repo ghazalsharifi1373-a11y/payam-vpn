@@ -1,8 +1,7 @@
-
 name: payam_vpn
 description: Android VPN client
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.0+2
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -11,6 +10,8 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_v2ray_client: ^3.5.0
+  shared_preferences: ^2.5.3
+  http: ^1.5.0
 
 dev_dependencies:
   flutter_test:
