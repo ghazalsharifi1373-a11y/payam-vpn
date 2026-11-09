@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_v2ray_client/flutter_v2ray.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
@@ -144,10 +145,8 @@ class _HomePageState extends State<HomePage> {
   Future<void> initializeApp() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-
       final savedServers = prefs.getString('servers') ?? '[]';
       final savedHistory = prefs.getStringList('history') ?? [];
-
       final decoded = jsonDecode(savedServers) as List;
 
       servers = decoded
@@ -166,25 +165,18 @@ class _HomePageState extends State<HomePage> {
       );
 
       if (!mounted) return;
+      setState(() => initialized = true);
 
-      setState(() {
-        initialized = true;
-      });
-
-      // Fetch the latest public server list automatically on app startup.
       unawaited(updateServers());
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        initialized = true;
-      });
+      setState(() => initialized = true);
       showMessage('Initialization error: $e');
     }
   }
 
   Future<void> saveData() async {
     final prefs = await SharedPreferences.getInstance();
-
     await prefs.setString(
       'servers',
       jsonEncode(servers.map((server) => server.toJson()).toList()),
@@ -195,13 +187,62 @@ class _HomePageState extends State<HomePage> {
 
   void showMessage(String message) {
     if (!mounted) return;
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
         backgroundColor: const Color(0xFF12334A),
       ),
     );
+  }
+
+  // Fetches the engine's diagnostic log so connection failures can be examined.
+  Future<void> showEngineLogs() async {
+    try {
+      final List<String> logs = await v2ray.getLogs();
+      if (!mounted) return;
+
+      final String logText = logs.isEmpty
+          ? 'No engine logs were returned yet. Try connecting once, then open this page again.'
+          : logs.join('\n');
+
+      showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          backgroundColor: const Color(0xFF102238),
+          title: const Text('VPN engine logs'),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 360,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                logText,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  color: Colors.white70,
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: logText));
+                Navigator.pop(dialogContext);
+                showMessage('Logs copied. Paste them into this chat.');
+              },
+              child: const Text('COPY LOGS'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('CLOSE'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      showMessage('Could not read engine logs: $e');
+    }
   }
 
   String formatRate(int value) {
@@ -313,10 +354,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> updateServers() async {
     if (busy) return;
 
-    if (feedUrl.trim().isEmpty) {
-      feedUrl = defaultServerFeedUrl;
-    }
-
+    if (feedUrl.trim().isEmpty) feedUrl = defaultServerFeedUrl;
     if (!feedUrl.startsWith('https://')) {
       showMessage('Feed address must use HTTPS');
       return;
@@ -337,7 +375,6 @@ class _HomePageState extends State<HomePage> {
       }
 
       final dynamic data = jsonDecode(utf8.decode(response.bodyBytes));
-
       if (data is! List) {
         throw Exception('Invalid JSON format: expected a list');
       }
@@ -358,7 +395,6 @@ class _HomePageState extends State<HomePage> {
 
         final name = (item['name'] ?? 'Online server').toString();
         final country = (item['country'] ?? 'Unknown').toString();
-
         final existingIndex =
             servers.indexWhere((server) => server.link == link);
 
@@ -367,19 +403,16 @@ class _HomePageState extends State<HomePage> {
           servers[existingIndex].country = country;
           updated++;
         } else {
-          servers.add(
-            ServerEntry(
-              name: name,
-              country: country,
-              link: link,
-            ),
-          );
+          servers.add(ServerEntry(
+            name: name,
+            country: country,
+            link: link,
+          ));
           added++;
         }
       }
 
       await saveData();
-
       if (mounted) setState(() {});
       showMessage('Server list updated: $added added, $updated refreshed');
     } catch (e) {
@@ -391,7 +424,6 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> configureFeed() async {
     final controller = TextEditingController(text: feedUrl);
-
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -423,7 +455,6 @@ class _HomePageState extends State<HomePage> {
       if (mounted) setState(() {});
       showMessage('Feed address saved');
     }
-
     controller.dispose();
   }
 
@@ -456,12 +487,10 @@ class _HomePageState extends State<HomePage> {
       for (int i = 0; i < servers.length; i++) {
         final delay = await testServer(servers[i]);
         servers[i].delay = delay;
-
         if (delay > 0 && delay < bestDelay) {
           bestDelay = delay;
           bestIndex = i;
         }
-
         if (mounted) setState(() {});
       }
 
@@ -469,9 +498,7 @@ class _HomePageState extends State<HomePage> {
 
       if (bestIndex == -1) {
         showMessage('No responding server found');
-        if (mounted) {
-          setState(() => statusText = 'No working server');
-        }
+        if (mounted) setState(() => statusText = 'No working server');
         return;
       }
 
@@ -483,10 +510,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> connectToServer(int index) async {
-    if (!initialized ||
-        busy ||
-        index < 0 ||
-        index >= servers.length) {
+    if (!initialized || busy || index < 0 || index >= servers.length) {
       return;
     }
 
@@ -518,12 +542,10 @@ class _HomePageState extends State<HomePage> {
       );
 
       selectedServer = index;
-
       history.insert(0, server.name);
       if (history.length > 30) {
         history = history.take(30).toList();
       }
-
       await saveData();
 
       if (mounted) {
@@ -548,7 +570,6 @@ class _HomePageState extends State<HomePage> {
     try {
       await v2ray.stopV2Ray();
       if (!mounted) return;
-
       setState(() {
         connected = false;
         downloadSpeed = 0;
@@ -575,8 +596,7 @@ class _HomePageState extends State<HomePage> {
             children: [
               TextField(
                 controller: nameController,
-                decoration:
-                    const InputDecoration(labelText: 'Server name'),
+                decoration: const InputDecoration(labelText: 'Server name'),
               ),
               TextField(
                 controller: countryController,
@@ -614,17 +634,15 @@ class _HomePageState extends State<HomePage> {
           link.startsWith('ss://');
 
       if (valid) {
-        servers.add(
-          ServerEntry(
-            name: nameController.text.trim().isEmpty
-                ? 'New server'
-                : nameController.text.trim(),
-            country: countryController.text.trim().isEmpty
-                ? 'Unknown'
-                : countryController.text.trim(),
-            link: link,
-          ),
-        );
+        servers.add(ServerEntry(
+          name: nameController.text.trim().isEmpty
+              ? 'New server'
+              : nameController.text.trim(),
+          country: countryController.text.trim().isEmpty
+              ? 'Unknown'
+              : countryController.text.trim(),
+          link: link,
+        ));
         await saveData();
         if (mounted) setState(() {});
         showMessage('Server saved');
@@ -646,10 +664,8 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> removeServer(int index) async {
     servers.removeAt(index);
-
     if (selectedServer == index) selectedServer = -1;
     if (selectedServer > index) selectedServer--;
-
     await saveData();
     if (mounted) setState(() {});
   }
@@ -673,7 +689,6 @@ class _HomePageState extends State<HomePage> {
 
     try {
       final currentServers = List<ServerEntry>.from(servers);
-
       for (final server in currentServers) {
         if (!mounted || !speedSortEnabled) break;
         server.delay = await testServer(server);
@@ -705,7 +720,6 @@ class _HomePageState extends State<HomePage> {
 
   void toggleSpeedSort(bool enabled) {
     setState(() => speedSortEnabled = enabled);
-
     speedSortTimer?.cancel();
     speedSortTimer = null;
 
@@ -714,9 +728,7 @@ class _HomePageState extends State<HomePage> {
       speedSortTimer = Timer.periodic(
         const Duration(seconds: 30),
         (_) {
-          if (speedSortEnabled && mounted) {
-            refreshSpeedOrder();
-          }
+          if (speedSortEnabled && mounted) refreshSpeedOrder();
         },
       );
     } else {
@@ -726,7 +738,6 @@ class _HomePageState extends State<HomePage> {
 
   Widget serverTile(int index) {
     final server = servers[index];
-
     return Card(
       color: const Color(0xFF102238),
       child: ListTile(
@@ -744,10 +755,8 @@ class _HomePageState extends State<HomePage> {
             if (value == 'connect') connectToServer(index);
           },
           itemBuilder: (context) => [
-            const PopupMenuItem(
-                value: 'connect', child: Text('Connect')),
-            const PopupMenuItem(
-                value: 'favorite', child: Text('Favorite')),
+            const PopupMenuItem(value: 'connect', child: Text('Connect')),
+            const PopupMenuItem(value: 'favorite', child: Text('Favorite')),
             const PopupMenuItem(value: 'delete', child: Text('Delete')),
           ],
           child: Icon(
@@ -770,11 +779,8 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           children: [
             const SizedBox(height: 25),
-            const Icon(
-              Icons.travel_explore,
-              size: 100,
-              color: Color(0xFF00B8FF),
-            ),
+            const Icon(Icons.travel_explore,
+                size: 100, color: Color(0xFF00B8FF)),
             const SizedBox(height: 15),
             const Text(
               'PAYAM VPN',
@@ -818,9 +824,7 @@ class _HomePageState extends State<HomePage> {
                   ],
                 ),
                 child: Icon(
-                  busy
-                      ? Icons.hourglass_top
-                      : Icons.power_settings_new,
+                  busy ? Icons.hourglass_top : Icons.power_settings_new,
                   size: 75,
                   color: const Color(0xFF00D5FF),
                 ),
@@ -865,8 +869,8 @@ class _HomePageState extends State<HomePage> {
                 const Expanded(
                   child: Text(
                     'SERVERS',
-                    style: TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.bold),
+                    style:
+                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
                 ),
                 IconButton(
@@ -955,6 +959,11 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('Payam VPN'),
         actions: [
+          IconButton(
+            tooltip: 'VPN engine logs',
+            onPressed: showEngineLogs,
+            icon: const Icon(Icons.article_outlined),
+          ),
           IconButton(
             onPressed: configureFeed,
             icon: const Icon(Icons.settings),
