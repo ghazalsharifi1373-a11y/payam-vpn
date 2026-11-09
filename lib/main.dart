@@ -4,8 +4,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_v2ray_client/flutter_v2ray.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -38,15 +38,13 @@ class ServerEntry {
         'delay': delay,
       };
 
-  factory ServerEntry.fromJson(Map<String, dynamic> json) {
-    return ServerEntry(
-      name: (json['name'] ?? 'Server').toString(),
-      country: (json['country'] ?? 'Unknown').toString(),
-      link: (json['link'] ?? '').toString(),
-      favorite: json['favorite'] == true,
-      delay: (json['delay'] as num?)?.toInt() ?? -1,
-    );
-  }
+  factory ServerEntry.fromJson(Map<String, dynamic> json) => ServerEntry(
+        name: (json['name'] ?? 'Server').toString(),
+        country: (json['country'] ?? 'Unknown').toString(),
+        link: (json['link'] ?? '').toString(),
+        favorite: json['favorite'] == true,
+        delay: (json['delay'] as num?)?.toInt() ?? -1,
+      );
 }
 
 class PayamApp extends StatelessWidget {
@@ -97,6 +95,8 @@ class _HomePageState extends State<HomePage> {
   bool speedSortRunning = false;
 
   Timer? speedSortTimer;
+  Completer<bool>? connectionCompleter;
+  bool waitingForConnection = false;
 
   String statusText = 'Disconnected';
   String feedUrl = defaultServerFeedUrl;
@@ -114,8 +114,8 @@ class _HomePageState extends State<HomePage> {
       onStatusChanged: (status) {
         if (!mounted) return;
 
-        final state = status.state.toString().toLowerCase().trim();
-        final stateName = state.split('.').last;
+        final stateName =
+            status.state.toString().toLowerCase().trim().split('.').last;
 
         setState(() {
           downloadSpeed = status.downloadSpeed;
@@ -126,6 +126,14 @@ class _HomePageState extends State<HomePage> {
           if (stateName == 'connected') {
             connected = true;
             statusText = 'Connected';
+
+            // A successful callback, not startV2Ray() returning, confirms
+            // that the VPN engine reports an active connection.
+            if (waitingForConnection &&
+                connectionCompleter != null &&
+                !connectionCompleter!.isCompleted) {
+              connectionCompleter!.complete(true);
+            }
           } else if (stateName == 'disconnected') {
             connected = false;
             statusText = 'Disconnected';
@@ -145,18 +153,15 @@ class _HomePageState extends State<HomePage> {
   Future<void> initializeApp() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final savedServers = prefs.getString('servers') ?? '[]';
-      final savedHistory = prefs.getStringList('history') ?? [];
-      final decoded = jsonDecode(savedServers) as List;
+      final decoded = jsonDecode(prefs.getString('servers') ?? '[]') as List;
 
       servers = decoded
-          .map((item) => ServerEntry.fromJson(
-                Map<String, dynamic>.from(item),
-              ))
+          .map((item) =>
+              ServerEntry.fromJson(Map<String, dynamic>.from(item)))
           .where((server) => server.link.isNotEmpty)
           .toList();
 
-      history = savedHistory;
+      history = prefs.getStringList('history') ?? [];
       feedUrl = prefs.getString('feedUrl') ?? defaultServerFeedUrl;
 
       await v2ray.initialize(
@@ -166,7 +171,6 @@ class _HomePageState extends State<HomePage> {
 
       if (!mounted) return;
       setState(() => initialized = true);
-
       unawaited(updateServers());
     } catch (e) {
       if (!mounted) return;
@@ -195,14 +199,13 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // Fetches the engine's diagnostic log so connection failures can be examined.
   Future<void> showEngineLogs() async {
     try {
-      final List<String> logs = await v2ray.getLogs();
+      final logs = await v2ray.getLogs();
       if (!mounted) return;
 
-      final String logText = logs.isEmpty
-          ? 'No engine logs were returned yet. Try connecting once, then open this page again.'
+      final logText = logs.isEmpty
+          ? 'No engine logs yet. Try connecting once, then open this page again.'
           : logs.join('\n');
 
       showDialog<void>(
@@ -255,7 +258,7 @@ class _HomePageState extends State<HomePage> {
 
   String formatData(int value) {
     if (value < 1024) return '$value B';
-    if (value < 1024 * 1024) {
+    if (value < 1024 *  1024) {
       return '${(value / 1024).toStringAsFixed(1)} KB';
     }
     if (value < 1024 * 1024 * 1024) {
@@ -352,7 +355,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> updateServers() async {
-    if (busy) return;
+    if (busy || connected) return;
 
     if (feedUrl.trim().isEmpty) feedUrl = defaultServerFeedUrl;
     if (!feedUrl.startsWith('https://')) {
@@ -361,7 +364,7 @@ class _HomePageState extends State<HomePage> {
     }
 
     try {
-      if (mounted) setState(() => busy = true);
+      setState(() => busy = true);
 
       final response = await http
           .get(
@@ -426,7 +429,7 @@ class _HomePageState extends State<HomePage> {
     final controller = TextEditingController(text: feedUrl);
     final result = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFF102238),
         title: const Text('Server feed URL'),
         content: TextField(
@@ -437,12 +440,12 @@ class _HomePageState extends State<HomePage> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () =>
-                Navigator.pop(context, controller.text.trim()),
+                Navigator.pop(dialogContext, controller.text.trim()),
             child: const Text('Save'),
           ),
         ],
@@ -450,10 +453,14 @@ class _HomePageState extends State<HomePage> {
     );
 
     if (result != null && result.isNotEmpty) {
-      feedUrl = result;
-      await saveData();
-      if (mounted) setState(() {});
-      showMessage('Feed address saved');
+      if (!result.startsWith('https://')) {
+        showMessage('Feed address must use HTTPS');
+      } else {
+        feedUrl = result;
+        await saveData();
+        if (mounted) setState(() {});
+        showMessage('Feed address saved');
+      }
     }
     controller.dispose();
   }
@@ -463,14 +470,16 @@ class _HomePageState extends State<HomePage> {
       final parsed = V2ray.parseFromURL(server.link);
       return await v2ray
           .getServerDelay(config: parsed.getFullConfiguration())
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 8));
     } catch (_) {
       return -1;
     }
   }
 
   Future<void> chooseFastest() async {
-    if (busy || servers.isEmpty) {
+    if (busy || connected) return;
+
+    if (servers.isEmpty) {
       showMessage('No servers available. Update the server list first.');
       return;
     }
@@ -485,19 +494,23 @@ class _HomePageState extends State<HomePage> {
 
     try {
       for (int i = 0; i < servers.length; i++) {
+        if (!mounted) return;
+
         final delay = await testServer(servers[i]);
         servers[i].delay = delay;
+
         if (delay > 0 && delay < bestDelay) {
           bestDelay = delay;
           bestIndex = i;
         }
+
         if (mounted) setState(() {});
       }
 
       await saveData();
 
       if (bestIndex == -1) {
-        showMessage('No responding server found');
+        showMessage('No responding server found. Check server links.');
         if (mounted) setState(() => statusText = 'No working server');
         return;
       }
@@ -510,7 +523,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> connectToServer(int index) async {
-    if (!initialized || busy || index < 0 || index >= servers.length) {
+    if (!initialized ||
+        busy ||
+        connected ||
+        index < 0 ||
+        index >= servers.length) {
       return;
     }
 
@@ -533,6 +550,9 @@ class _HomePageState extends State<HomePage> {
         throw Exception('VPN permission was not granted');
       }
 
+      connectionCompleter = Completer<bool>();
+      waitingForConnection = true;
+
       await v2ray.startV2Ray(
         remark: parsed.remark,
         config: parsed.getFullConfiguration(),
@@ -540,6 +560,21 @@ class _HomePageState extends State<HomePage> {
         bypassSubnets: null,
         proxyOnly: false,
       );
+
+      final confirmed = await connectionCompleter!.future.timeout(
+        const Duration(seconds: 25),
+        onTimeout: () => false,
+      );
+
+      waitingForConnection = false;
+      connectionCompleter = null;
+
+      if (!confirmed) {
+        throw Exception(
+          'VPN engine did not confirm connection within 25 seconds. '
+          'The server may be offline or its configuration may be invalid.',
+        );
+      }
 
       selectedServer = index;
       history.insert(0, server.name);
@@ -550,10 +585,20 @@ class _HomePageState extends State<HomePage> {
 
       if (mounted) {
         setState(() {
-          statusText = connected ? 'Connected' : 'Connecting...';
+          connected = true;
+          statusText = 'Connected';
         });
       }
     } catch (e) {
+      waitingForConnection = false;
+      connectionCompleter = null;
+
+      try {
+        await v2ray.stopV2Ray();
+      } catch (_) {
+        // Keep the original connection error for the user.
+      }
+
       if (mounted) {
         setState(() {
           connected = false;
@@ -567,6 +612,13 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> disconnect() async {
+    if (busy) return;
+
+    setState(() {
+      busy = true;
+      statusText = 'Disconnecting...';
+    });
+
     try {
       await v2ray.stopV2Ray();
       if (!mounted) return;
@@ -578,6 +630,8 @@ class _HomePageState extends State<HomePage> {
       });
     } catch (e) {
       showMessage('Disconnect error: $e');
+    } finally {
+      if (mounted) setState(() => busy = false);
     }
   }
 
@@ -588,7 +642,7 @@ class _HomePageState extends State<HomePage> {
 
     final result = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFF102238),
         title: const Text('Add server'),
         content: SingleChildScrollView(
@@ -615,11 +669,11 @@ class _HomePageState extends State<HomePage> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(dialogContext, true),
             child: const Text('Save'),
           ),
         ],
@@ -663,6 +717,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> removeServer(int index) async {
+    if (connected && selectedServer == index) {
+      showMessage('Disconnect before deleting the active server');
+      return;
+    }
+
     servers.removeAt(index);
     if (selectedServer == index) selectedServer = -1;
     if (selectedServer > index) selectedServer--;
@@ -675,6 +734,7 @@ class _HomePageState extends State<HomePage> {
         !speedSortEnabled ||
         speedSortRunning ||
         busy ||
+        connected ||
         servers.isEmpty) {
       return;
     }
@@ -690,12 +750,12 @@ class _HomePageState extends State<HomePage> {
     try {
       final currentServers = List<ServerEntry>.from(servers);
       for (final server in currentServers) {
-        if (!mounted || !speedSortEnabled) break;
+        if (!mounted || !speedSortEnabled || connected) break;
         server.delay = await testServer(server);
         if (mounted) setState(() {});
       }
 
-      if (!mounted || !speedSortEnabled) return;
+      if (!mounted || !speedSortEnabled || connected) return;
 
       servers.sort((a, b) {
         final aDelay = a.delay > 0 ? a.delay : 999999999;
@@ -728,7 +788,9 @@ class _HomePageState extends State<HomePage> {
       speedSortTimer = Timer.periodic(
         const Duration(seconds: 30),
         (_) {
-          if (speedSortEnabled && mounted) refreshSpeedOrder();
+          if (speedSortEnabled && mounted && !connected) {
+            refreshSpeedOrder();
+          }
         },
       );
     } else {
@@ -738,6 +800,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget serverTile(int index) {
     final server = servers[index];
+
     return Card(
       color: const Color(0xFF102238),
       child: ListTile(
@@ -747,12 +810,12 @@ class _HomePageState extends State<HomePage> {
           '${server.country} • '
           '${server.delay > 0 ? '${server.delay} ms' : 'Not tested'}',
         ),
-        onTap: busy ? null : () => connectToServer(index),
+        onTap: busy || connected ? null : () => connectToServer(index),
         trailing: PopupMenuButton<String>(
           onSelected: (value) {
             if (value == 'favorite') toggleFavorite(index);
             if (value == 'delete') removeServer(index);
-            if (value == 'connect') connectToServer(index);
+            if (value == 'connect' && !connected) connectToServer(index);
           },
           itemBuilder: (context) => [
             const PopupMenuItem(value: 'connect', child: Text('Connect')),
@@ -845,7 +908,7 @@ class _HomePageState extends State<HomePage> {
             trafficPanel(),
             const SizedBox(height: 10),
             OutlinedButton.icon(
-              onPressed: busy ? null : updateServers,
+              onPressed: busy || connected ? null : updateServers,
               icon: const Icon(Icons.sync),
               label: const Text('Update servers'),
             ),
@@ -874,11 +937,11 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 IconButton(
-                  onPressed: busy ? null : addServer,
+                  onPressed: busy || connected ? null : addServer,
                   icon: const Icon(Icons.add_circle),
                 ),
                 IconButton(
-                  onPressed: busy ? null : updateServers,
+                  onPressed: busy || connected ? null : updateServers,
                   icon: const Icon(Icons.sync),
                 ),
               ],
@@ -892,7 +955,7 @@ class _HomePageState extends State<HomePage> {
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             subtitle: const Text(
-              'Automatic speed test every 30 seconds',
+              'Automatic speed test every 30 seconds (paused while connected)',
               style: TextStyle(color: Colors.white60, fontSize: 11),
             ),
             value: speedSortEnabled,
